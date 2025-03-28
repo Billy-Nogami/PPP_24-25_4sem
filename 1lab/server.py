@@ -3,7 +3,6 @@ import csv
 import threading
 import os
 
-
 # Функция для обработки запроса клиента
 def handle_client(client_socket):
     try:
@@ -19,23 +18,20 @@ def handle_client(client_socket):
             table_name = request.split(" ")[2]
             show_structure(table_name, client_socket)
         else:
-            # Парсим запрос SELECT FROM table WHERE condition
-            table_name, condition = parse_request(
-                request
-                )
+            # Парсим запрос: предполагаем формат SELECT FROM table WHERE condition
+            table_name, condition = parse_request(request)
             # Чтение и фильтрация данных из CSV файла
             csv_file = f"./{table_name}/{table_name}.csv"
             if condition:  # Если есть условие WHERE
                 data = filter_data(csv_file, condition)
             else:
-                data = get_all_data(csv_file)  # Если нет возвращаем таблицу
+                data = get_all_data(csv_file)  # Если нет условия, возвращаем всю таблицу
             # Отправка результата клиенту
             send_csv_result(data, client_socket)
     except Exception as e:
         print(f"Ошибка: {e}")
     finally:
         client_socket.close()
-
 
 # Показ всех доступных файлов (таблиц)
 def show_files(client_socket):
@@ -47,21 +43,17 @@ def show_files(client_socket):
     except Exception as e:
         client_socket.send(f"Ошибка при получении файлов: {e}".encode())
 
-
-# Показ структуры названия столбцов
+# Показ структуры конкретной таблицы (названия столбцов)
 def show_structure(table_name, client_socket):
     try:
         csv_file = f"./{table_name}/{table_name}.csv"
         with open(csv_file, mode='r') as file:
             reader = csv.DictReader(file)
-            structure = reader.fieldnames  # названия колонок
-            response = f"Структура таблицы {table_name}:\n" + ", ".join(
-                structure
-                )
+            structure = reader.fieldnames  # Структура таблицы (названия колонок)
+            response = f"Структура таблицы {table_name}:\n" + ", ".join(structure)
             client_socket.send(response.encode())
     except Exception as e:
         client_socket.send(f"Ошибка при получении структуры: {e}".encode())
-
 
 # Парсинг запроса
 def parse_request(request):
@@ -75,7 +67,6 @@ def parse_request(request):
         condition = ""
     return table_name, condition
 
-
 # Чтение CSV файла и фильтрация данных по условию
 def filter_data(csv_file, condition):
     with open(csv_file, mode='r') as file:
@@ -85,23 +76,20 @@ def filter_data(csv_file, condition):
 
         for row in reader:
             try:
-                # Преобразуем все числа в строках в числа для сравнений
+                # Преобразуем все числа в строках в числа для корректных сравнений
                 row = {key: try_convert(value) for key, value in row.items()}
-
-                # проверяем, что столбец существует в данных
+                
+                # Применяем условие фильтрации (проверяем, что столбец существует в данных)
                 condition_with_columns = condition
                 for column in column_names:
-                    condition_with_columns = condition_with_columns.replace(
-                        column, f"row.get('{column}')"
-                        )
+                    condition_with_columns = condition_with_columns.replace(column, f"row.get('{column}')")
 
                 # Применяем условие
-                if eval(condition_with_columns, {}, {"row": row}):
+                if eval(condition_with_columns, {}, {"row": row}):  
                     filtered_rows.append(row)
             except Exception as e:
                 print(f"Ошибка при применении условия: {e}")
     return filtered_rows
-
 
 # Получение всех данных из таблицы
 def get_all_data(csv_file):
@@ -109,7 +97,6 @@ def get_all_data(csv_file):
         reader = csv.DictReader(file)
         all_rows = [row for row in reader]
     return all_rows
-
 
 # Функция для попытки преобразования строки в число (int или float)
 def try_convert(value):
@@ -120,7 +107,6 @@ def try_convert(value):
             return float(value)
         except ValueError:
             return value
-
 
 # Отправка результатов в CSV формате по частям
 def send_csv_result(data, client_socket):
@@ -140,12 +126,9 @@ def send_csv_result(data, client_socket):
     for i in range(0, len(result), max_chunk_size):
         chunk = result[i:i + max_chunk_size]
         client_socket.send(chunk.encode())
-        print(f"Отправлено {len(chunk)} байт")
-        # Логируем размер отправленного пакета
+        print(f"Отправлено {len(chunk)} байт")  # Логируем размер отправленного пакета
 
-    print(f"Отправлено всего {len(result)} байт")
-    # Логируем общий размер отправленных данных
-
+    print(f"Отправлено всего {len(result)} байт")  # Логируем общий размер отправленных данных
 
 # Функция для запуска сервера
 def start_server():
@@ -159,6 +142,5 @@ def start_server():
         client_socket, addr = server.accept()
         print(f"Подключен клиент {addr}")
         threading.Thread(target=handle_client, args=(client_socket,)).start()
-
 
 start_server()
