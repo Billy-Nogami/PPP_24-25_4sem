@@ -1,6 +1,5 @@
 import socket
 
-# Функция для отправки запроса и получения ответа от сервера
 def send_request(request):
     server_address = ('localhost', 9999)
 
@@ -19,8 +18,9 @@ def send_request(request):
                 break
             full_response += data
 
-            # Отправляем подтверждение получения данных
-            client_socket.send("ACK".encode())
+            # Проверка на окончание передачи данных
+            if "END" in data:
+                break
 
         print("Ответ от сервера:")
         print(full_response)
