@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+sqlalchemy
+alembic
+httpx
+websockets
+celery[redis]
+python-dotenv
+asyncio
+python-jose[cryptography]
+passlib
