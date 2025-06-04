@@ -11,17 +11,46 @@ app.include_router(auth.router)
 app.include_router(parse.router)
 
 
-# Keep-alive function to send periodic pings
 async def keep_alive(websocket: WebSocket, client_id: str):
     while True:
         try:
-            await asyncio.sleep(10)  # Send ping every 10 seconds
+            await asyncio.sleep(20)  # Увеличили интервал до 20 секунд
             await websocket.send_text("ping")
             print(f"Sent ping to client {client_id}")
         except Exception as e:
             print(f"Error sending ping to client {client_id}: {e}")
             break
 
+@app.websocket("/ws/{client_id}")
+async def websocket_endpoint(websocket: WebSocket, client_id: str):
+    await manager.connect(client_id, websocket)
+    print(f"Client {client_id} connected")
+    keep_alive_task = asyncio.create_task(keep_alive(websocket, client_id))
+    try:
+        while True:
+            data = await websocket.receive_text()
+            print(f"Received from client {client_id}: {data}")
+            
+            if data == "pong":
+                print(f"Received pong from client {client_id}")
+                continue
+                
+            if data == "TEST_CONNECTION":
+                await websocket.send_text("CONNECTION_OK")
+                print(f"Sent CONNECTION_OK to client {client_id}")
+                
+            if data == "ping":
+                await websocket.send_text("pong")
+                print(f"Sent pong to client {client_id}")
+                
+    except WebSocketDisconnect:
+        print(f"Client {client_id} disconnected")
+        manager.disconnect(client_id)
+        keep_alive_task.cancel()
+    except Exception as e:
+        print(f"Unexpected error in WebSocket for client {client_id}: {e}")
+        manager.disconnect(client_id)
+        keep_alive_task.cancel()
 @app.on_event("startup")
 async def startup_event():
     r = redis.Redis.from_url(settings.REDIS_URL)

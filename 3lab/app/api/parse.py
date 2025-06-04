@@ -20,11 +20,7 @@ def get_db():
 
 
 @router.post("/parse-url", response_model=TaskOut)
-def parse_url(
-    data: TaskCreate,
-    db: Session = Depends(get_db),
-    current_user: UserOut = Depends(get_current_user),
-):
+def parse_url(data: TaskCreate, db: Session = Depends(get_db)):
     task = create_task(db, url=data.url)
-    parse_url_task.delay(task.id, data.url, data.client_id)
+    parse_url_task.delay(task.id, data.url, data.client_id, data.build_graph)
     return task

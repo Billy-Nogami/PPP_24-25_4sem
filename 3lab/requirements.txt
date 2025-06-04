@@ -9,3 +9,4 @@ python-dotenv
 asyncio
 python-jose[cryptography]
 passlib
+lxml

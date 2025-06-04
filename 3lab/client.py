@@ -8,76 +8,65 @@ async def main():
     client_id = str(uuid.uuid4())
     print(f"Ваш client_id: {client_id}")
     
-    # Аутентификация пользователя
+    # Аутентификация
     username = input("Введите имя пользователя: ")
     password = input("Введите пароль: ")
     
     async with httpx.AsyncClient() as client:
-        # Получаем токен аутентификации
+        # Получение токена
         try:
             token_response = await client.post(
                 "http://localhost:8000/token",
-                data={
-                    "username": username,
-                    "password": password,
-                    "grant_type": "password"
-                }
+                data={"username": username, "password": password, "grant_type": "password"}
             )
             
             if token_response.status_code != 200:
                 print(f"Ошибка аутентификации: {token_response.status_code}")
-                print(token_response.text)
                 return
                 
             token_data = token_response.json()
             access_token = token_data["access_token"]
-            print("Успешная аутентификация!")
+            print("✅ Аутентификация успешна!")
+            
         except Exception as e:
-            print(f"Ошибка при получении токена: {e}")
+            print(f"❌ Ошибка при получении токена: {e}")
             return
 
     try:
         # Устанавливаем WebSocket соединение
-        async with websockets.connect(f"ws://localhost:8000/ws/{client_id}") as websocket:
-            print("Устанавливаем WebSocket соединение...")
-            
-            # Проверяем соединение
+        async with websockets.connect(
+            f"ws://localhost:8000/ws/{client_id}",
+            ping_interval=30,
+            ping_timeout=120
+        ) as websocket:
+            # Проверка соединения
             await websocket.send("TEST_CONNECTION")
-            response = await asyncio.wait_for(websocket.recv(), timeout=5.0)
-            if response == "CONNECTION_OK":
-                print("Соединение проверено и работает корректно.")
-            else:
-                print(f"Неожиданный ответ от сервера: {response}")
+            response = await websocket.recv()
+            if response != "CONNECTION_OK":
+                print("Ошибка подключения к WebSocket")
                 return
 
-            # Запрос URL для парсинга
+            # Отправка задачи
             url = input("Введите URL для парсинга: ")
+            build_graph = input("Построить граф сайта? (y/n): ").lower() == 'y'
             
-            # Отправляем задачу на парсинг с авторизацией
             async with httpx.AsyncClient() as client:
-                print("Отправляем задачу на парсинг...")
-                try:
-                    response = await client.post(
-                        "http://localhost:8000/parse-url",
-                        json={"url": url, "client_id": client_id},
-                        headers={"Authorization": f"Bearer {access_token}"}
-                    )
-                    
-                    if response.status_code != 200:
-                        print(f"Ошибка при отправке задачи: {response.status_code}")
-                        print(response.text)
-                        return
-                        
-                    task_info = response.json()
-                    print("Задача отправлена:", task_info)
-                    print(f"ID задачи: {task_info['id']}")
-                except Exception as e:
-                    print(f"Ошибка при отправке задачи: {e}")
-                    return
+                response = await client.post(
+                    "http://localhost:8000/parse-url",
+                    json={
+                        "url": url,
+                        "client_id": client_id,
+                        "build_graph": build_graph
+                    },
+                    headers={"Authorization": f"Bearer {access_token}"}
+                )
+                task_info = response.json()
+                print(f"\nЗадача создана. ID: {task_info['id']}")
 
-            # Ожидаем результат
-            print("Ожидаем результат...")
-            timeout_count = 0
+            # Ожидание результата с отображением прогресса
+            print("\nПрогресс выполнения:")
+            print("=" * 50)
+            
             while True:
                 try:
                     message = await asyncio.wait_for(websocket.recv(), timeout=30.0)
@@ -85,71 +74,74 @@ async def main():
                     # Обработка ping/pong
                     if message == "ping":
                         await websocket.send("pong")
-                        print("Получен ping, отправлен pong")
                         continue
                     
-                    # Проверяем, относится ли сообщение к нашей задаче
                     try:
-                        message_data = json.loads(message)
-                        if "task_id" in message_data and message_data["task_id"] == task_info["id"]:
-                            print("\n" + "="*50)
-                            print("Получен результат задачи:")
-                            print(f"Статус: {message_data.get('status')}")
-                            print(f"Сообщение: {message_data.get('message')}")
+                        data = json.loads(message)
+                        
+                        # Отображение прогресса
+                        if data.get("type") == "progress":
+                            msg = data["message"]
+                            count = data.get("count", 0)
                             
-                            if "result" in message_data:
-                                print(f"Найдено ссылок: {len(message_data['result'])}")
+                            # Форматированный вывод
+                            if "Обработка" in msg:
+                                print(f"\n {msg}")
+                            elif "Результат" in msg:
+                                status = count
+                                status_str = f"Статус: {status}"
+                                if status == 200:
+                                    print(f" {status_str}")
+                                elif status >= 400:
+                                    print(f" {status_str}")
+                                else:
+                                    print(f"ℹ️ {status_str}")
+                            elif "Найдено ссылок" in msg:
+                                print(f" {msg}")
+                            else:
+                                print(f"ℹ️ {msg}")
+                        
+                        # Отображение результата
+                        elif data.get("type") == "result":
+                            result_data = data.get("data", {})
+                            print("\n" + "=" * 50)
+                            print("🎉 ЗАДАЧА ЗАВЕРШЕНА")
+                            
+                            if build_graph:
+                                graph = result_data.get("graph", {})
+                                print(f"Узлов графа: {len(graph)}")
+                                print(f"Связей: {sum(len(links) for links in graph.values())}")
+                                print(f"Сообщение: {result_data.get('message', '')}")
+                            else:
+                                links = result_data.get("links", [])
+                                print(f"Найдено ссылок: {len(links)}")
                                 print("Первые 5 ссылок:")
-                                for link in message_data["result"][:5]:
-                                    print(f"- {link}")
+                                for link in links[:5]:
+                                    print(f"  • {link}")
                             
-                            print("="*50 + "\n")
+                            print("=" * 50)
                             break
+                    
                     except json.JSONDecodeError:
-                        # Если сообщение не JSON, проверяем как текст
-                        if "Task" in message and str(task_info['id']) in message:
-                            print("Ответ от сервера:", message)
-                            break
-                        else:
-                            print(f"Получено сообщение: {message}")
-                    
-                except asyncio.TimeoutError:
-                    timeout_count += 1
-                    if timeout_count > 4:  # 2 минуты ожидания (30 сек * 4)
-                        print("Таймаут: результат не получен в течение 2 минут")
-                        break
-                    print("Ожидание результата...")
-                except websockets.exceptions.ConnectionClosed:
-                    print("Соединение закрыто сервером")
-                    break
-                except Exception as e:
-                    print(f"Ошибка при получении сообщения: {e}")
-                    break
-                    
-            # Проверяем статус задачи в базе
-            try:
-                async with httpx.AsyncClient() as client:
-                    task_response = await client.get(
-                        f"http://localhost:8000/tasks/{task_info['id']}",
-                        headers={"Authorization": f"Bearer {access_token}"}
-                    )
-                    
-                    if task_response.status_code == 200:
-                        task_data = task_response.json()
-                        print(f"Финальный статус задачи: {task_data['status']}")
-                        if task_data['result']:
-                            try:
-                                links = json.loads(task_data['result'])
-                                print(f"Всего найдено ссылок: {len(links)}")
-                            except:
-                                print(f"Результат: {task_data['result'][:100]}...")
-                    else:
-                        print(f"Не удалось получить статус задачи: {task_response.status_code}")
-            except Exception as e:
-                print(f"Ошибка при проверке статуса задачи: {e}")
+                        print(f"📨 {message}")
                 
+                except asyncio.TimeoutError:
+                    # Отправляем ping для поддержания соединения
+                    try:
+                        await websocket.send("ping")
+                        print("⚡ Отправлен ping для поддержания соединения")
+                    except:
+                        break
+                    
+                except Exception as e:
+                    print(f"⚠️ Ошибка: {e}")
+                    break
+                    
     except Exception as e:
-        print(f"Ошибка при подключении к WebSocket: {e}")
+        print(f"⛔ Критическая ошибка: {e}")
 
 if __name__ == "__main__":
+    print("=" * 50)
+    print("🌐 РЕАЛЬНЫЙ МОНИТОРИНГ ПАРСИНГА САЙТОВ")
+    print("=" * 50)
     asyncio.run(main())
